@@ -1,0 +1,18 @@
+[
+  {
+    "natural_language": "Which services does the 'api-gateway' depend on?",
+    "cypher": "MATCH (s:Service {name: 'api-gateway'})-[:DEPENDS_ON]->(dependency:Service) RETURN dependency.name AS dependencies"
+  },
+  {
+    "natural_language": "List all instances for the 'user-service'.",
+    "cypher": "MATCH (i:Instance)-[:INSTANCE_OF]->(s:Service {name: 'user-service'}) RETURN i.id AS instance_id, i.ip_address AS ip, i.status AS status"
+  },
+  {
+    "natural_language": "Find all services located in the 'us-east-1' region.",
+    "cypher": "MATCH (s:Service)-[:LOCATED_IN]->(r:Region {name: 'us-east-1'}) RETURN s.name AS service_name"
+  },
+  {
+    "natural_language": "Show me the full dependency graph for the 'checkout-service'.",
+    "cypher": "MATCH p=(s:Service {name: 'checkout-service'})-[:DEPENDS_ON*]->(downstream:Service) RETURN nodes(p) AS path_nodes, relationships(p) AS path_relationships"
+  }
+] 
