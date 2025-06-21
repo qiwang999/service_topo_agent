@@ -1,17 +1,18 @@
 import json
 from dotenv import load_dotenv
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 
 # Local imports
 from agent_state import GraphState
 from tools.llm_client import setup_llm
 from tools.neo4j_client import Neo4jClient
-from nodes.cypher_generator import CypherGeneratorNode, PromptManager
+from nodes.cypher_generator import CypherGeneratorNode
 from nodes.cypher_validator import CypherValidatorNode
 from nodes.query_executor import QueryExecutorNode
 from nodes.summarizer_node import SummarizerNode
 from nodes.manual_summarizer_node import ManualSummarizerNode
+from prompts.prompt_manager import PromptManager
 
 # Load environment variables from .env file
 load_dotenv()
@@ -127,29 +128,29 @@ class Text2CypherAgent:
             print("   - Execution successful. Proceeding to summarize.")
             return "summarize"
 
-    def run(self, query: str) -> dict:
+    def run(self, conversation_history: list, new_query: str) -> dict:
         """
-        Executes the agent with a given natural language query.
+        Executes the agent for a single turn of a conversation.
+
+        Args:
+            conversation_history (list): A list of previous messages in the conversation.
+            new_query (str): The new user query for the current turn.
+
+        Returns:
+            dict: The final state of the graph after execution for this turn.
         """
-        initial_state = {"messages": [("user", query)], "retries": 0}
+        # Append the new user query to the history to form the current state
+        current_messages = conversation_history + [HumanMessage(content=new_query)]
+        
+        # Initial state for this conversational turn
+        initial_state = {
+            "messages": current_messages,
+            "retries": 0
+        }
+        
         # Set a recursion limit to prevent infinite loops
         final_state = self.app.invoke(initial_state, {"recursion_limit": 10})
-
-        # Format the final output
-        final_result_message = final_state['messages'][-1]
-        if isinstance(final_result_message, ToolMessage):
-            try:
-                result_data = json.loads(final_result_message.content)
-            except json.JSONDecodeError:
-                result_data = {"error": "Could not parse the final result.",
-                               "raw_content": final_result_message.content}
-        else:
-            # This might happen if the graph ends on a failure note without a ToolMessage
-            result_data = {"final_message": str(final_result_message)}
-
-        return {
-            "raw_json_result": result_data,
-            "generated_cypher": final_state.get("generation"),
-            "summary": final_state.get("summary"),
-            "retries": final_state.get("retries")
-        }
+        
+        # The returned state contains the full message history up to this point,
+        # including the latest user query and the agent's summary.
+        return final_state
