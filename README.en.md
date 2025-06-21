@@ -17,6 +17,24 @@ The agent is designed with a modular architecture, making it easy to extend and 
     - **`llm` mode**: Provides a natural language summary of the results, perfect for human users.
     - **`manual` mode**: Formats the results into a structured JSON object, ideal for frontend applications or other programs.
 
+## Run Modes
+
+The agent supports multiple run modes to accommodate different use cases:
+
+- **Standard Mode (`standard`)**:
+  - Includes complete LLM validation step
+  - Performs syntax checking before executing Cypher queries
+  - Provides higher accuracy and reliability
+  - Suitable for production environments and scenarios requiring high precision
+
+- **Fast Mode (`fast`)**:
+  - Skips LLM validation step
+  - Goes directly from generator to executor
+  - Significantly improves response speed
+  - Suitable for development testing and scenarios requiring fast response
+
+You can set the default mode via the `DEFAULT_RUN_MODE` environment variable, or dynamically specify it via the `run_mode` parameter in each API call.
+
 ## Workflow
 
 The agent follows a robust, multi-step process to ensure accuracy and provide a great user experience.
@@ -100,6 +118,14 @@ NEO4J_PASSWORD="your_neo4j_password"
 
 # Optional: Enable interaction logging for data collection
 ENABLE_INTERACTION_LOGGING="false"
+
+# Optional: Default run mode (standard or fast)
+# - standard: Includes validation step for better accuracy
+# - fast: Skips validation for faster execution
+DEFAULT_RUN_MODE="standard"
+
+# Optional: Summarizer type (llm or manual)
+SUMMARIZER_TYPE="llm"
 ```
 **Note**: Ensure your Neo4j database is running and accessible.
 
@@ -139,18 +165,34 @@ This is the core endpoint for conversation.
   ```json
   {
     "question": "What is your question?",
-    "session_id": "unique_session_id_optional"
+    "session_id": "unique_session_id_optional",
+    "run_mode": "run_mode_optional"
   }
   ```
   * The `session_id` field is optional. If provided, all interactions with the same ID will be associated; if not provided, the system will automatically generate a new ID for this interaction.
+  * The `run_mode` field is optional and can override the default run mode:
+    - `"standard"`: Standard mode, includes LLM validation step for better accuracy
+    - `"fast"`: Fast mode, skips validation step for faster execution
+    - If not provided, will use the default mode configured in the `DEFAULT_RUN_MODE` environment variable
 
-- **Example `curl` command**:
+- **Example `curl` commands**:
   ```bash
+  # Standard mode (default)
   curl -X POST http://localhost:5000/chat \
        -H "Content-Type: application/json" \
        -d '{
              "question": "Which services does the api-gateway depend on?",
-             "session_id": ""
+             "session_id": "",
+             "run_mode": "standard"
+           }'
+  
+  # Fast mode
+  curl -X POST http://localhost:5000/chat \
+       -H "Content-Type: application/json" \
+       -d '{
+             "question": "Which services does the api-gateway depend on?",
+             "session_id": "",
+             "run_mode": "fast"
            }'
   ```
 

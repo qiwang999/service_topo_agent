@@ -18,18 +18,26 @@ db_manager = DBManager()
 # Check for the interaction logging switch from environment variables
 ENABLE_LOGGING = os.environ.get("ENABLE_INTERACTION_LOGGING", "false").lower() == "true"
 
+# Check for the default run mode from environment variables
+DEFAULT_RUN_MODE = os.environ.get("DEFAULT_RUN_MODE", "standard")
+
 # A function to create a new agent instance. This will be called on startup
 # and every time feedback is submitted.
-def create_agent():
+def create_agent(run_mode=None):
     print("--- Loading feedback and creating new agent instance... ---")
     feedback_examples = db_manager.load_feedback_as_examples()
     summarizer_choice = os.environ.get("SUMMARIZER_TYPE", "llm")
+    
+    # Use provided run_mode or default from environment
+    agent_run_mode = run_mode or DEFAULT_RUN_MODE
+    
     try:
         new_agent = Text2CypherAgent(
             summarizer_type=summarizer_choice,
-            feedback_examples=feedback_examples
+            feedback_examples=feedback_examples,
+            run_mode=agent_run_mode
         )
-        print(f"--- Agent Initialized Successfully (Summarizer: {summarizer_choice}, Feedback examples: {len(feedback_examples)}) ---")
+        print(f"--- Agent Initialized Successfully (Summarizer: {summarizer_choice}, Run Mode: {agent_run_mode}, Feedback examples: {len(feedback_examples)}) ---")
         return new_agent
     except Exception as e:
         print(f"FATAL: Agent initialization failed: {e}")
@@ -49,14 +57,21 @@ def chat():
         data = request.get_json()
         user_query = data.get('query')
         conversation_history = data.get('history', [])
+        run_mode = data.get('run_mode')  # Allow runtime override of run mode
         
         # Get or create a conversation ID
         conversation_id = data.get('conversation_id') or str(uuid.uuid4())
 
         if not user_query: return jsonify({"error": "Missing 'query'."}), 400
 
+        # If run_mode is specified and different from current agent's mode, create a new agent
+        if run_mode and run_mode != agent.run_mode:
+            print(f"--- Switching to run mode: {run_mode} ---")
+            agent = create_agent(run_mode)
+
         result = agent.run(conversation_history, user_query)
         result['conversation_id'] = conversation_id # Return the ID to the client
+        result['run_mode'] = agent.run_mode  # Include current run mode in response
 
         # --- Interaction Logging ---
         if ENABLE_LOGGING:

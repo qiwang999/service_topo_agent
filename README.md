@@ -17,6 +17,24 @@
     - **`llm` 模式**: 对结果提供自然语言摘要，非常适合人类用户阅读。
     - **`manual` 模式**: 将结果格式化为结构化的 JSON 对象，是前端应用或其他程序的理想选择。
 
+## 运行模式
+
+智能体支持多种运行模式，以满足不同的使用场景：
+
+- **标准模式 (`standard`)**：
+  - 包含完整的 LLM 校验步骤
+  - 在执行 Cypher 查询前进行语法检查
+  - 提供更高的准确性和可靠性
+  - 适合生产环境和需要高精度的场景
+
+- **快速模式 (`fast`)**：
+  - 跳过 LLM 校验步骤
+  - 直接从生成器到执行器
+  - 显著提升响应速度
+  - 适合开发测试和需要快速响应的场景
+
+您可以通过环境变量 `DEFAULT_RUN_MODE` 设置默认模式，或在每次 API 调用时通过 `run_mode` 参数动态指定。
+
 ## 工作流
 
 智能体遵循一个健壮的多步骤流程，以确保结果的准确性和良好的用户体验。
@@ -100,6 +118,14 @@ NEO4J_PASSWORD="your_neo4j_password"
 
 # 可选：启用交互日志功能用于数据收集
 ENABLE_INTERACTION_LOGGING="false"
+
+# 可选：默认运行模式 (standard 或 fast)
+# - standard: 包含校验步骤，提供更好的准确性
+# - fast: 跳过校验步骤，提供更快的执行速度
+DEFAULT_RUN_MODE="standard"
+
+# 可选：汇总器类型 (llm 或 manual)
+SUMMARIZER_TYPE="llm"
 ```
 **注意**: 请确保您的 Neo4j 数据库正在运行且可以访问。
 
@@ -139,18 +165,34 @@ gunicorn --config gunicorn_config.py app:app
   ```json
   {
     "question": "你的问题是什么?",
-    "session_id": "唯一会话ID (可选)"
+    "session_id": "唯一会话ID (可选)",
+    "run_mode": "运行模式 (可选)"
   }
   ```
   * `session_id` 字段是可选的。如果提供，属于同一 ID 的所有交互会被关联起来；如果不提供，系统会自动为本次交互生成一个新的 ID。
+  * `run_mode` 字段是可选的，用于覆盖默认运行模式：
+    - `"standard"`: 标准模式，包含 LLM 校验步骤，提供更好的准确性
+    - `"fast"`: 快速模式，跳过校验步骤，提供更快的执行速度
+    - 如果不提供，将使用环境变量 `DEFAULT_RUN_MODE` 中配置的默认模式
 
 - **示例 `curl` 命令**:
   ```bash
+  # 标准模式（默认）
   curl -X POST http://localhost:5000/chat \
        -H "Content-Type: application/json" \
        -d '{
              "question": "api-gateway 依赖哪些服务?",
-             "session_id": ""
+             "session_id": "",
+             "run_mode": "standard"
+           }'
+  
+  # 快速模式
+  curl -X POST http://localhost:5000/chat \
+       -H "Content-Type: application/json" \
+       -d '{
+             "question": "api-gateway 依赖哪些服务?",
+             "session_id": "",
+             "run_mode": "fast"
            }'
   ```
 

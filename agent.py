@@ -26,10 +26,11 @@ class Text2CypherAgent:
     It initializes all components, builds the graph, and provides a run method.
     """
 
-    def __init__(self, feedback_examples: List[Dict], model_name="gpt-4o", prompt_template: str = None, examples_file_path: str = "examples.json", summarizer_type: str = "llm"):
+    def __init__(self, feedback_examples: List[Dict], model_name="gpt-4o", prompt_template: str = None, examples_file_path: str = "examples.json", summarizer_type: str = "llm", run_mode: str = "standard"):
         self.llm = setup_llm(model_name)
         self.neo4j_client = Neo4jClient()
         self.db_schema = self.neo4j_client.get_schema()
+        self.run_mode = run_mode
 
         # The prompt manager now receives the feedback examples directly
         self.prompt_manager = PromptManager(feedback_examples, prompt_template, examples_file_path)
@@ -47,6 +48,7 @@ class Text2CypherAgent:
         else:
             raise ValueError(f"Invalid summarizer_type: '{summarizer_type}'. Must be 'llm' or 'manual'.")
         
+        print(f"--- Run mode: {run_mode} ---")
         self.app = self._build_graph()
 
     def _build_graph(self):
@@ -55,21 +57,29 @@ class Text2CypherAgent:
 
         # The node functions are methods of our node classes
         workflow.add_node("generator", self.generator_node_wrapper)
-        workflow.add_node("validator", self.cypher_validator_node.validate)
         workflow.add_node("executor", self.query_executor_node.execute)
         workflow.add_node("summarizer", self.summarizer_node.summarize)
 
         workflow.set_entry_point("generator")
 
-        workflow.add_edge("generator", "validator")
-        workflow.add_conditional_edges(
-            "validator",
-            self.decide_after_validation,
-            {
-                "regenerate": "generator",
-                "execute": "executor"
-            }
-        )
+        if self.run_mode == "fast":
+            # Fast mode: skip validation, go directly from generator to executor
+            workflow.add_edge("generator", "executor")
+            print("   - Fast mode: Skipping validation for faster execution")
+        else:
+            # Standard mode: include validation
+            workflow.add_node("validator", self.cypher_validator_node.validate)
+            workflow.add_edge("generator", "validator")
+            workflow.add_conditional_edges(
+                "validator",
+                self.decide_after_validation,
+                {
+                    "regenerate": "generator",
+                    "execute": "executor"
+                }
+            )
+            print("   - Standard mode: Including validation step")
+
         workflow.add_conditional_edges(
             "executor",
             self.decide_after_execution,
