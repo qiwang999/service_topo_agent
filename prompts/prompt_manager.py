@@ -1,5 +1,5 @@
 import json
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -14,8 +14,11 @@ Only return the Cypher query, without any explanations or enclosing it in ```cyp
 # Neo4j Schema:
 {schema}
 
-# Few-Shot Examples:
+# Few-Shot Examples from curated list:
 {examples}
+
+# Real-World Examples from User Feedback:
+{feedback_examples}
 
 ---
 # Conversation History:
@@ -30,30 +33,36 @@ Natural Language Query: {question}
 
 class PromptManager:
     """
-    Manages loading and formatting of prompt templates and few-shot examples.
+    Manages loading and formatting of prompt templates, few-shot examples, and user feedback.
     """
-    def __init__(self, prompt_template_str: str = None, examples_file_path: str = "examples.json"):
+    def __init__(self, feedback_examples: List[Dict], prompt_template_str: str = None, examples_file_path: str = "examples.json"):
         self.template_str = prompt_template_str if prompt_template_str is not None else DEFAULT_PROMPT_TEMPLATE
-        self.examples = self._load_examples(examples_file_path)
+        
+        # Load curated examples from JSON
+        self.examples = self._load_examples_from_json(examples_file_path)
         self.formatted_examples = self._format_examples_for_prompt(self.examples)
+
+        # Use feedback examples passed in from the agent orchestrator
+        self.formatted_feedback_examples = self._format_examples_for_prompt(feedback_examples)
+
         self.prompt_template = ChatPromptTemplate.from_template(self.template_str)
 
-    def _load_examples(self, file_path: str) -> List[dict]:
-        """Loads few-shot examples from a JSON file."""
+    def _load_examples_from_json(self, file_path: str) -> List[Dict]:
+        """Loads few-shot examples from a standard JSON file."""
         try:
             with open(file_path, 'r') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Warning: Could not load examples from {file_path}. Proceeding without examples. Error: {e}")
+            print(f"Warning: Could not load examples from {file_path}. Error: {e}")
             return []
-
-    def _format_examples_for_prompt(self, examples: List[dict]) -> str:
+    
+    def _format_examples_for_prompt(self, examples: List[Dict]) -> str:
         """Formats the examples list into a string for the prompt."""
         if not examples:
-            return "No examples provided."
+            return "No examples available."
         
         return "\n\n".join(
-            [f"# Natural Language: {ex['natural_language']}\n# Cypher: {ex['cypher']}" for ex in examples]
+            [f"# Natural Language: {ex['natural_language']}\n# Cypher: {ex['cypher']}" for ex in examples if ex.get('natural_language') and ex.get('cypher')]
         )
     
     @staticmethod
@@ -84,4 +93,7 @@ class PromptManager:
         return self.prompt_template
 
     def get_formatted_examples(self) -> str:
-        return self.formatted_examples 
+        return self.formatted_examples
+
+    def get_formatted_feedback(self) -> str:
+        return self.formatted_feedback_examples 

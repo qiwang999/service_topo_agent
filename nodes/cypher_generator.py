@@ -73,7 +73,8 @@ class CypherGeneratorNode:
             "schema": schema,
             "question": current_question_message.content,
             "chat_history": chat_history_str,
-            "examples": self.prompt_manager.get_formatted_examples()
+            "examples": self.prompt_manager.get_formatted_examples(),
+            "feedback_examples": self.prompt_manager.get_formatted_feedback()
         })
         
         # Clean up the generated query

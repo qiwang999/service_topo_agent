@@ -38,11 +38,11 @@ graph TD;
     G --> H;
 ```
 
-## Architecture
+## System Architecture
 
 The project is organized into a modular structure for clarity and scalability:
 
-- `main.py`: The main entry point of the application.
+- `app.py`: The main Flask web service entry point.
 - `agent.py`: The core `Text2CypherAgent` class that assembles and orchestrates all components.
 - `agent_state.py`: Defines the shared `GraphState` for the entire workflow.
 - `nodes/`: Contains individual, single-responsibility nodes for the graph.
@@ -56,6 +56,8 @@ The project is organized into a modular structure for clarity and scalability:
     - `neo4j_client.py`: Manages the connection to the Neo4j database.
 - `prompts/`: Manages all prompt-related logic.
     - `prompt_manager.py`: Loads and formats prompt templates and examples.
+- `database/`: Database management components.
+    - `db_manager.py`: Manages SQLite database operations for feedback and interaction logs.
 - `examples.json`: Stores few-shot examples for the prompt, making it easy to improve the agent without changing code.
 
 ## Setup Instructions
@@ -95,20 +97,89 @@ OPENAI_API_KEY="your_openai_api_key"
 NEO4J_URI="bolt://localhost:7687"
 NEO4J_USERNAME="neo4j"
 NEO4J_PASSWORD="your_neo4j_password"
+
+# Optional: Enable interaction logging for data collection
+ENABLE_INTERACTION_LOGGING="false"
 ```
 **Note**: Ensure your Neo4j database is running and accessible.
 
 ## How to Run
 
-1.  **Choose a Summarizer**: Open `main.py` and set the `summarizer_choice` variable to either `'llm'` or `'manual'`.
-2.  **Run the script**:
+This project is packaged as a Flask web service and is recommended to be run with Gunicorn for production.
 
-    ```bash
-    python main.py
-    ```
+### 1. Start the Service
 
-You can change the `natural_language_query` variable in `main.py` to ask your own questions about your service topology.
+A convenience script is provided. Run the following commands in the project's root directory:
+
+```bash
+# First, make the script executable (only needs to be done once)
+chmod +x run.sh
+
+# Then, start the service
+./run.sh
+```
+The service will start on `http://0.0.0.0:5000`. You can modify the host, port, worker count, and other settings in `gunicorn_config.py`.
+
+Alternatively, you can run Gunicorn directly:
+```bash
+gunicorn --config gunicorn_config.py app:app
+```
+
+### 2. Interact with the Agent via API
+
+You can use any HTTP client (like `curl`, Postman, or Python's `requests` library) to interact with the agent.
+
+#### `/chat` Endpoint
+
+This is the core endpoint for conversation.
+
+- **URL**: `/chat`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+    "question": "What is your question?",
+    "session_id": "unique_session_id_optional"
+  }
+  ```
+  * The `session_id` field is optional. If provided, all interactions with the same ID will be associated; if not provided, the system will automatically generate a new ID for this interaction.
+
+- **Example `curl` command**:
+  ```bash
+  curl -X POST http://localhost:5000/chat \
+       -H "Content-Type: application/json" \
+       -d '{
+             "question": "Which services does the api-gateway depend on?",
+             "session_id": ""
+           }'
+  ```
+
+#### `/feedback` Endpoint
+
+Used to submit user feedback to improve the model.
+
+- **URL**: `/feedback`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+      "question": "The user's original question",
+      "generated_cypher": "The agent's incorrect Cypher",
+      "correct_cypher": "The user's corrected Cypher",
+      "rating": 1
+  }
+  ```
 
 ## Improving the Agent
 
-To improve the agent's accuracy, you don't need to change the code. Simply add new, high-quality examples of "natural language -> Cypher" pairs to the `examples.json` file. The agent will automatically use them in its prompts on the next run. 
+### Interaction Logging
+
+You can enable interaction logging by setting the environment variable `ENABLE_INTERACTION_LOGGING=true`.
+
+When this feature is enabled, every successful call to the `/chat` endpoint will automatically log the **question**, **generated Cypher**, and **final summary** to the `interaction_logs` table in the `feedback.db` database. This data is crucial for future model fine-tuning, evaluation, and mining new example cases.
+
+### User Feedback
+
+When a user submits high-quality feedback (a rating of 4 or 5) via the `/feedback` endpoint, it is **automatically saved into `feedback.db` (an SQLite database)**.
+
+Upon receiving new feedback, the service **automatically reloads the agent**, incorporating all high-quality feedback from the database as new "real-world examples" into its prompt. This enables true **Online Learning**, allowing the agent to evolve and improve immediately after receiving feedback, without requiring a restart. 

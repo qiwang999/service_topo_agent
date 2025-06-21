@@ -1,7 +1,9 @@
 import json
 from dotenv import load_dotenv
-from langchain_core.messages import ToolMessage, HumanMessage
+from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
+
+from typing import List, Dict
 
 # Local imports
 from agent_state import GraphState
@@ -24,24 +26,18 @@ class Text2CypherAgent:
     It initializes all components, builds the graph, and provides a run method.
     """
 
-    def __init__(self, model_name="gpt-4o", prompt_template: str = None, examples_file_path: str = "examples.json", summarizer_type: str = "llm"):
-        # Setup tools and clients
+    def __init__(self, feedback_examples: List[Dict], model_name="gpt-4o", prompt_template: str = None, examples_file_path: str = "examples.json", summarizer_type: str = "llm"):
         self.llm = setup_llm(model_name)
         self.neo4j_client = Neo4jClient()
         self.db_schema = self.neo4j_client.get_schema()
 
-        # Setup prompt manager
-        self.prompt_manager = PromptManager(
-            prompt_template, examples_file_path)
+        # The prompt manager now receives the feedback examples directly
+        self.prompt_manager = PromptManager(feedback_examples, prompt_template, examples_file_path)
 
-        # Setup graph nodes
-        self.cypher_generator_node = CypherGeneratorNode(
-            self.llm, self.prompt_manager)
-        self.cypher_validator_node = CypherValidatorNode(
-            self.llm, self.db_schema)
+        self.cypher_generator_node = CypherGeneratorNode(self.llm, self.prompt_manager)
+        self.cypher_validator_node = CypherValidatorNode(self.llm, self.db_schema)
         self.query_executor_node = QueryExecutorNode(self.neo4j_client)
-
-        # Initialize the selected summarizer node based on the chosen type
+        
         if summarizer_type == "llm":
             self.summarizer_node = SummarizerNode(self.llm)
             print("--- Using LLM-based summarizer ---")
@@ -49,10 +45,8 @@ class Text2CypherAgent:
             self.summarizer_node = ManualSummarizerNode()
             print("--- Using manual logic-based summarizer ---")
         else:
-            raise ValueError(
-                f"Invalid summarizer_type: '{summarizer_type}'. Must be 'llm' or 'manual'.")
-
-        # Build and compile the graph
+            raise ValueError(f"Invalid summarizer_type: '{summarizer_type}'. Must be 'llm' or 'manual'.")
+        
         self.app = self._build_graph()
 
     def _build_graph(self):
@@ -99,8 +93,7 @@ class Text2CypherAgent:
         validation_result = state.get("validation_result")
         if validation_result == "invalid":
             print("   - Syntax validation failed. Regenerating query.")
-            error_message = "The previously generated query has invalid syntax. Please generate a new, syntactically correct query."
-            state["messages"].append(("user", error_message))
+            state["messages"].append(AIMessage(content="The previously generated query has invalid syntax. Please generate a new, syntactically correct query."))
             return "regenerate"
         else:
             print("   - Syntax validation successful. Proceeding to execution.")
@@ -120,8 +113,7 @@ class Text2CypherAgent:
                 return "end"
             else:
                 print("   - Execution failed. Regenerating query.")
-                error_message = f"The query execution failed. Please fix it. Error: {last_message.content}"
-                state["messages"].append(("user", error_message))
+                state["messages"].append(AIMessage(content=f"The query execution failed. Please fix it. Error: {last_message.content}"))
                 return "regenerate"
         else:
             # Execution successful path
@@ -131,26 +123,33 @@ class Text2CypherAgent:
     def run(self, conversation_history: list, new_query: str) -> dict:
         """
         Executes the agent for a single turn of a conversation.
-
-        Args:
-            conversation_history (list): A list of previous messages in the conversation.
-            new_query (str): The new user query for the current turn.
-
-        Returns:
-            dict: The final state of the graph after execution for this turn.
         """
-        # Append the new user query to the history to form the current state
-        current_messages = conversation_history + [HumanMessage(content=new_query)]
+        # Convert simple dict history to LangChain message objects
+        messages = []
+        for msg in conversation_history:
+            if msg.get("role") == "user":
+                messages.append(HumanMessage(content=msg.get("content")))
+            elif msg.get("role") == "agent":
+                messages.append(AIMessage(content=msg.get("content")))
         
-        # Initial state for this conversational turn
-        initial_state = {
-            "messages": current_messages,
-            "retries": 0
-        }
+        # Append the new user query
+        messages.append(HumanMessage(content=new_query))
         
-        # Set a recursion limit to prevent infinite loops
+        initial_state = { "messages": messages, "retries": 0 }
+        
         final_state = self.app.invoke(initial_state, {"recursion_limit": 10})
         
-        # The returned state contains the full message history up to this point,
-        # including the latest user query and the agent's summary.
-        return final_state
+        # Prepare response for the web service
+        summary = final_state.get("summary", "I'm sorry, I couldn't process that.")
+        
+        # Update history for client
+        updated_history = conversation_history + [
+            {"role": "user", "content": new_query},
+            {"role": "agent", "content": summary}
+        ]
+
+        return {
+            "summary": summary,
+            "generated_cypher": final_state.get("generation"),
+            "updated_history": updated_history,
+        }

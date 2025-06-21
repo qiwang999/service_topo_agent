@@ -8,7 +8,7 @@
 
 ## 核心功能
 
-- **自然语言转 Cypher**: 将“API 网关依赖哪些服务？”这类问题，精准翻译为 Cypher 查询。
+- **自然语言转 Cypher**: 将"API 网关依赖哪些服务？"这类问题，精准翻译为 Cypher 查询。
 - **两阶段校验**:
     1.  **LLM 预校验**: 在执行前，由一个 LLM 对生成的 Cypher 进行语法检查。
     2.  **数据库执行**: 查询在 Neo4j 中运行，将其作为最终的校验器。
@@ -42,7 +42,7 @@ graph TD;
 
 项目采用模块化结构，以实现清晰性和可扩展性：
 
-- `main.py`: 应用程序的主入口。
+- `app.py`: Flask Web 服务的主入口。
 - `agent.py`: 核心的 `Text2CypherAgent` 类，负责组装和调度所有组件。
 - `agent_state.py`: 为整个工作流定义共享的 `GraphState`。
 - `nodes/`: 包含图中各个独立的、单一职责的节点。
@@ -56,6 +56,8 @@ graph TD;
     - `neo4j_client.py`: 管理与 Neo4j 数据库的连接。
 - `prompts/`: 管理所有与 `prompt` 相关的逻辑。
     - `prompt_manager.py`: 加载并格式化 `prompt` 模板和示例。
+- `database/`: 数据库管理组件。
+    - `db_manager.py`: 管理 SQLite 数据库操作，包括反馈和交互日志。
 - `examples.json`: 存储用于 `prompt` 的 few-shot 示例，使得在不修改代码的情况下提升智能体性能变得简单。
 
 ## 安装与配置
@@ -95,20 +97,89 @@ OPENAI_API_KEY="your_openai_api_key"
 NEO4J_URI="bolt://localhost:7687"
 NEO4J_USERNAME="neo4j"
 NEO4J_PASSWORD="your_neo4j_password"
+
+# 可选：启用交互日志功能用于数据收集
+ENABLE_INTERACTION_LOGGING="false"
 ```
 **注意**: 请确保您的 Neo4j 数据库正在运行且可以访问。
 
 ## 如何运行
 
-1.  **选择汇总器模式**: 打开 `main.py` 文件，将 `summarizer_choice` 变量设置为 `'llm'` 或 `'manual'`.
-2.  **运行脚本**:
+本项目已封装为 Flask Web 服务，并推荐使用 Gunicorn 作为生产环境的服务器。
 
-    ```bash
-    python main.py
-    ```
+### 1. 启动服务
 
-您可以修改 `main.py` 中的 `natural_language_query` 变量，来提出您自己关于服务拓扑的问题。
+我们提供了一个便捷的启动脚本。在项目根目录运行以下命令：
+
+```bash
+# 首先，为脚本添加可执行权限 (仅需执行一次)
+chmod +x run.sh
+
+# 然后，启动服务
+./run.sh
+```
+服务将在 `http://0.0.0.0:5000` 上启动。您可以在 `gunicorn_config.py` 中修改主机、端口和工作进程数等详细配置。
+
+或者，您也可以直接使用 `gunicorn` 命令启动：
+```bash
+gunicorn --config gunicorn_config.py app:app
+```
+
+### 2. 通过 API 与智能体交互
+
+您可以使用任何 HTTP 客户端 (如 `curl`, Postman, 或者 Python `requests` 库) 与智能体进行交互。
+
+#### `/chat` 端点
+
+这是进行对话的核心端点。
+
+- **URL**: `/chat`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+    "question": "你的问题是什么?",
+    "session_id": "唯一会话ID (可选)"
+  }
+  ```
+  * `session_id` 字段是可选的。如果提供，属于同一 ID 的所有交互会被关联起来；如果不提供，系统会自动为本次交互生成一个新的 ID。
+
+- **示例 `curl` 命令**:
+  ```bash
+  curl -X POST http://localhost:5000/chat \
+       -H "Content-Type: application/json" \
+       -d '{
+             "question": "api-gateway 依赖哪些服务?",
+             "session_id": ""
+           }'
+  ```
+
+#### `/feedback` 端点
+
+用于提交用户反馈以改进模型。
+
+- **URL**: `/feedback`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+      "question": "用户的原始问题",
+      "generated_cypher": "智能体生成的错误 Cypher",
+      "correct_cypher": "用户修正后的正确 Cypher",
+      "rating": 1
+  }
+  ```
 
 ## 如何改进智能体
 
-要提升智能体的准确性，您无需修改代码。只需在 `examples.json` 文件中添加更多高质量的“自然语言 -> Cypher”示例对即可。智能体会在下次运行时自动将它们用于 `prompt` 中。 
+### 交互日志
+
+您可以通过设置环境变量 `ENABLE_INTERACTION_LOGGING=true` 来开启交互日志功能。
+
+当该功能开启时，每一次对 `/chat` 端点的成功调用，其**问题**、**生成的 Cypher** 和**最终摘要**都会被自动记录到 `feedback.db` 数据库的 `interaction_logs` 表中。这些数据对于后续进行模型微调、评估和挖掘新的 `example` 案例至关重要。
+
+### 用户反馈
+
+当用户通过 `/feedback` 端点提交了评分为 4 或 5 的高质量反馈后，该反馈会被**自动存入 `feedback.db` (一个 SQLite 数据库)**。
+
+当服务收到新的反馈时，它会**自动重新加载 Agent**，并将数据库中所有高分反馈作为新的"真实世界示例"注入到 `prompt` 中。这实现了真正的**在线学习（Online Learning）**，使智能体能够在接收到反馈后立即自我进化，无需重启服务。 
