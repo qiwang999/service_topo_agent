@@ -20,13 +20,16 @@ Do not just restate the data; interpret it and present it in a helpful way. If t
 # Your Summary:
 """
 
+
 class SummarizerNode:
     """
     A node that summarizes the query result into natural language.
     """
+
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
-        self.prompt_template = ChatPromptTemplate.from_template(SUMMARIZER_PROMPT_TEMPLATE)
+        self.prompt_template = ChatPromptTemplate.from_template(
+            SUMMARIZER_PROMPT_TEMPLATE)
         self.chain = self.prompt_template | self.llm
 
     def summarize(self, state: GraphState) -> dict:
@@ -40,7 +43,7 @@ class SummarizerNode:
             dict: A dictionary containing the summary.
         """
         print("--- 6. SUMMARIZING RESULT ---")
-        
+
         # The original question is the first user message
         original_question = state["messages"][0].content
         # The query result is in the last ToolMessage
@@ -49,13 +52,13 @@ class SummarizerNode:
             if isinstance(msg, ToolMessage):
                 query_result = msg.content
                 break
-        
+
         response = self.chain.invoke({
             "question": original_question,
             "query_result": query_result
         })
-        
+
         summary = response.content.strip()
         print(f"   - Generated Summary: {summary}")
-        
-        return {"summary": summary} 
+
+        return {"summary": summary}

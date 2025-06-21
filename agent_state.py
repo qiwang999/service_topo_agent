@@ -1,6 +1,7 @@
 from typing import TypedDict, Annotated
 from langgraph.graph.message import add_messages
 
+
 class GraphState(TypedDict):
     """
     Represents the state of our graph.
@@ -16,4 +17,4 @@ class GraphState(TypedDict):
     generation: str
     retries: int
     validation_result: str
-    summary: str 
+    summary: str

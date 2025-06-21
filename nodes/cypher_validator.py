@@ -20,14 +20,17 @@ Respond with a single word: 'valid' if the query is syntactically correct, or 'i
 {query}
 """
 
+
 class CypherValidatorNode:
     """
     A node that validates the syntax of a generated Cypher query using an LLM.
     """
+
     def __init__(self, llm: ChatOpenAI, schema: str):
         self.llm = llm
         self.schema = schema
-        self.prompt_template = ChatPromptTemplate.from_template(VALIDATION_PROMPT_TEMPLATE)
+        self.prompt_template = ChatPromptTemplate.from_template(
+            VALIDATION_PROMPT_TEMPLATE)
         self.chain = self.prompt_template | self.llm
 
     def validate(self, state: GraphState) -> dict:
@@ -42,16 +45,16 @@ class CypherValidatorNode:
         """
         print("--- 4. VALIDATING CYPHER SYNTAX ---")
         query_to_validate = state["generation"]
-        
+
         response = self.chain.invoke({
             "schema": self.schema,
             "query": query_to_validate
         })
-        
+
         validation_result = response.content.strip().lower()
         print(f"   - Validation Result: {validation_result}")
-        
+
         if "invalid" in validation_result:
             return {"validation_result": "invalid"}
         else:
-            return {"validation_result": "valid"} 
+            return {"validation_result": "valid"}
