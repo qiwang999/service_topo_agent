@@ -1,112 +1,114 @@
-# Service Topology Agent with LangGraph
+[English](./README.en.md)
 
-This project implements an intelligent agent using LangChain and LangGraph that understands natural language questions about **service topology**, converts them into Cypher queries, executes them against a Neo4j database, and returns a user-friendly result.
+# 服务拓扑智能体 (基于 LangGraph)
 
-The agent is designed with a modular architecture, making it easy to extend and maintain.
+本项目使用 LangChain 和 LangGraph 实现了一个智能体，它能理解关于**服务拓扑**的自然语言问题，将其转换为 Cypher 查询语句，在 Neo4j 数据库中执行，并返回对用户友好的结果。
 
-## Core Features
+该智能体采用模块化架构设计，易于扩展和维护。
 
-- **Natural Language to Cypher**: Translates questions like "Which services depend on the API gateway?" into precise Cypher queries.
-- **Two-Stage Validation**:
-    1.  **LLM Pre-Validation**: An LLM checks the generated Cypher for syntax errors before execution.
-    2.  **Database Execution**: The query is run against Neo4j, which serves as the ultimate validator.
-- **Automatic Retries**: If either validation or execution fails, the agent attempts to correct the query automatically, retrying up to 3 times.
-- **Dual Summarization Modes**:
-    - **`llm` mode**: Provides a natural language summary of the results, perfect for human users.
-    - **`manual` mode**: Formats the results into a structured JSON object, ideal for frontend applications or other programs.
+## 核心功能
 
-## Workflow
+- **自然语言转 Cypher**: 将“API 网关依赖哪些服务？”这类问题，精准翻译为 Cypher 查询。
+- **两阶段校验**:
+    1.  **LLM 预校验**: 在执行前，由一个 LLM 对生成的 Cypher 进行语法检查。
+    2.  **数据库执行**: 查询在 Neo4j 中运行，将其作为最终的校验器。
+- **自动重试**: 如果校验或执行失败，智能体会自动尝试修正查询，最多重试 3 次。
+- **双汇总模式**:
+    - **`llm` 模式**: 对结果提供自然语言摘要，非常适合人类用户阅读。
+    - **`manual` 模式**: 将结果格式化为结构化的 JSON 对象，是前端应用或其他程序的理想选择。
 
-The agent follows a robust, multi-step process to ensure accuracy and provide a great user experience.
+## 工作流
+
+智能体遵循一个健壮的多步骤流程，以确保结果的准确性和良好的用户体验。
 
 ```mermaid
 graph TD;
-    A[Natural Language Query] --> B(Generator);
-    B --> C{Validator};
-    C -- Valid --> D[Executor];
-    C -- Invalid --> B;
-    D -- Success --> E{Summarizer};
-    D -- Execution Failed --> B;
-    subgraph "Summarization Mode"
+    A[自然语言查询] --> B(生成器);
+    B --> C{校验器};
+    C -- 有效 --> D[执行器];
+    C -- 无效 --> B;
+    D -- 成功 --> E{汇总器};
+    D -- 执行失败 --> B;
+    subgraph "汇总模式"
         direction LR
-        E -- llm --> F[LLM Summary];
-        E -- manual --> G[Structured JSON];
+        E -- llm --> F[LLM 摘要];
+        E -- manual --> G[结构化 JSON];
     end
-    F --> H[Final Answer];
+    F --> H[最终答案];
     G --> H;
 ```
 
-## Architecture
+## 系统架构
 
-The project is organized into a modular structure for clarity and scalability:
+项目采用模块化结构，以实现清晰性和可扩展性：
 
-- `main.py`: The main entry point of the application.
-- `agent.py`: The core `Text2CypherAgent` class that assembles and orchestrates all components.
-- `agent_state.py`: Defines the shared `GraphState` for the entire workflow.
-- `nodes/`: Contains individual, single-responsibility nodes for the graph.
-    - `cypher_generator.py`: Generates the initial Cypher query (LLM 1).
-    - `cypher_validator.py`: Validates the query's syntax (LLM 2).
-    - `query_executor.py`: Executes the query against Neo4j.
-    - `summarizer_node.py`: Summarizes results using an LLM.
-    - `manual_summarizer_node.py`: Formats results using predefined logic.
-- `tools/`: Holds clients for external services.
-    - `llm_client.py`: Initializes the connection to the OpenAI API.
-    - `neo4j_client.py`: Manages the connection to the Neo4j database.
-- `prompts/`: Manages all prompt-related logic.
-    - `prompt_manager.py`: Loads and formats prompt templates and examples.
-- `examples.json`: Stores few-shot examples for the prompt, making it easy to improve the agent without changing code.
+- `main.py`: 应用程序的主入口。
+- `agent.py`: 核心的 `Text2CypherAgent` 类，负责组装和调度所有组件。
+- `agent_state.py`: 为整个工作流定义共享的 `GraphState`。
+- `nodes/`: 包含图中各个独立的、单一职责的节点。
+    - `cypher_generator.py`: 生成初始 Cypher 查询 (LLM 1)。
+    - `cypher_validator.py`: 校验查询语法 (LLM 2)。
+    - `query_executor.py`: 在 Neo4j 中执行查询。
+    - `summarizer_node.py`: 使用 LLM 对结果进行汇总。
+    - `manual_summarizer_node.py`: 使用预定义逻辑格式化结果。
+- `tools/`: 存放用于与外部服务交互的客户端。
+    - `llm_client.py`: 初始化与 OpenAI API 的连接。
+    - `neo4j_client.py`: 管理与 Neo4j 数据库的连接。
+- `prompts/`: 管理所有与 `prompt` 相关的逻辑。
+    - `prompt_manager.py`: 加载并格式化 `prompt` 模板和示例。
+- `examples.json`: 存储用于 `prompt` 的 few-shot 示例，使得在不修改代码的情况下提升智能体性能变得简单。
 
-## Setup Instructions
+## 安装与配置
 
-### 1. Environment Setup
+### 1. 环境设置
 
-It is recommended to use a virtual environment.
+建议使用 Python 虚拟环境。
 
 ```bash
-# Create a virtual environment
+# 创建虚拟环境
 python -m venv venv
 
-# Activate it
-# On macOS/Linux:
+# 激活虚拟环境
+# 在 macOS/Linux 上:
 source venv/bin/activate
-# On Windows:
+# 在 Windows 上:
 .\\venv\\Scripts\\activate
 ```
 
-### 2. Install Dependencies
+### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment Variables
+### 3. 配置环境变量
 
-Create a `.env` file in the project's root directory by copying `.env.example`. Then, fill in your OpenAI and Neo4j credentials.
+在项目根目录中，通过复制 `.env.example` 来创建一个 `.env` 文件，然后填入您的 OpenAI 和 Neo4j 凭证。
 
 ```
-# .env file
+# .env 文件
 
-# OpenAI API Key
+# OpenAI API 密钥
 OPENAI_API_KEY="your_openai_api_key"
 
-# Neo4j Credentials
+# Neo4j 数据库凭证
 NEO4J_URI="bolt://localhost:7687"
 NEO4J_USERNAME="neo4j"
 NEO4J_PASSWORD="your_neo4j_password"
 ```
-**Note**: Ensure your Neo4j database is running and accessible.
+**注意**: 请确保您的 Neo4j 数据库正在运行且可以访问。
 
-## How to Run
+## 如何运行
 
-1.  **Choose a Summarizer**: Open `main.py` and set the `summarizer_choice` variable to either `'llm'` or `'manual'`.
-2.  **Run the script**:
+1.  **选择汇总器模式**: 打开 `main.py` 文件，将 `summarizer_choice` 变量设置为 `'llm'` 或 `'manual'`.
+2.  **运行脚本**:
 
     ```bash
     python main.py
     ```
 
-You can change the `natural_language_query` variable in `main.py` to ask your own questions about your service topology.
+您可以修改 `main.py` 中的 `natural_language_query` 变量，来提出您自己关于服务拓扑的问题。
 
-## Improving the Agent
+## 如何改进智能体
 
-To improve the agent's accuracy, you don't need to change the code. Simply add new, high-quality examples of "natural language -> Cypher" pairs to the `examples.json` file. The agent will automatically use them in its prompts on the next run. 
+要提升智能体的准确性，您无需修改代码。只需在 `examples.json` 文件中添加更多高质量的“自然语言 -> Cypher”示例对即可。智能体会在下次运行时自动将它们用于 `prompt` 中。 
