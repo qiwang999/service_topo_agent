@@ -10,10 +10,12 @@ class EnhancedPromptManager:
 
     def __init__(self, vector_db_manager: VectorDBManager,
                  base_prompt_template: str = None,
-                 examples_file_path: str = "examples.json"):
+                 examples_file_path: str = "examples.json",
+                 default_similarity_method: str = 'cosine'):
         self.vector_db_manager = vector_db_manager
         self.base_prompt_template = base_prompt_template or self._get_default_prompt()
         self.examples_file_path = examples_file_path
+        self.default_similarity_method = default_similarity_method
 
     def _get_default_prompt(self) -> str:
         """Get the default prompt template."""
@@ -32,20 +34,26 @@ class EnhancedPromptManager:
 
 请生成一个Cypher查询语句，只返回查询语句，不要包含任何解释或额外文本。"""
 
-    def get_dynamic_examples(self, question: str, max_examples: int = 5) -> List[Dict]:
+    def get_dynamic_examples(self, question: str, max_examples: int = 5,
+                           similarity_method: str = None) -> List[Dict]:
         """
         Get dynamically selected examples based on semantic similarity.
 
         Args:
             question (str): The user's question
             max_examples (int): Maximum number of examples to return
+            similarity_method (str): Similarity method to use
 
         Returns:
             List[Dict]: List of similar examples
         """
+        if similarity_method is None:
+            similarity_method = self.default_similarity_method
+            
         # Find similar examples using semantic search
         similar_examples = self.vector_db_manager.find_similar_examples(
-            question, top_k=max_examples, min_similarity=0.7
+            question, top_k=max_examples, min_similarity=0.7,
+            method=similarity_method
         )
 
         # Convert to the expected format
@@ -71,19 +79,25 @@ class EnhancedPromptManager:
 
         return examples
 
-    def get_similar_feedback(self, question: str, max_feedback: int = 3) -> List[Dict]:
+    def get_similar_feedback(self, question: str, max_feedback: int = 3,
+                           similarity_method: str = None) -> List[Dict]:
         """
         Get similar feedback based on semantic similarity.
 
         Args:
             question (str): The user's question
             max_feedback (int): Maximum number of feedback items to return
+            similarity_method (str): Similarity method to use
 
         Returns:
             List[Dict]: List of similar feedback
         """
+        if similarity_method is None:
+            similarity_method = self.default_similarity_method
+            
         similar_feedback = self.vector_db_manager.find_similar_feedback(
-            question, top_k=max_feedback, min_similarity=0.8
+            question, top_k=max_feedback, min_similarity=0.8,
+            method=similarity_method
         )
 
         return similar_feedback
@@ -128,8 +142,9 @@ class EnhancedPromptManager:
         return "\n".join(formatted_examples)
 
     def create_enhanced_prompt(self, question: str, db_schema: str,
-                               use_dynamic_examples: bool = True,
-                               include_feedback: bool = True) -> str:
+                             use_dynamic_examples: bool = True,
+                             include_feedback: bool = True,
+                             similarity_method: str = None) -> str:
         """
         Create an enhanced prompt with dynamic example selection.
 
@@ -138,13 +153,17 @@ class EnhancedPromptManager:
             db_schema (str): Database schema
             use_dynamic_examples (bool): Whether to use dynamic example selection
             include_feedback (bool): Whether to include similar feedback
+            similarity_method (str): Similarity method to use
 
         Returns:
             str: Enhanced prompt
         """
+        if similarity_method is None:
+            similarity_method = self.default_similarity_method
+            
         # Get examples
         if use_dynamic_examples:
-            examples = self.get_dynamic_examples(question)
+            examples = self.get_dynamic_examples(question, similarity_method=similarity_method)
         else:
             static_examples = self._load_static_examples()
             examples = [{'natural_language': ex['natural_language'],
@@ -154,7 +173,7 @@ class EnhancedPromptManager:
         # Get similar feedback if requested
         feedback_examples = []
         if include_feedback:
-            feedback_examples = self.get_similar_feedback(question)
+            feedback_examples = self.get_similar_feedback(question, similarity_method=similarity_method)
 
         # Format examples
         examples_text = self.format_examples_for_prompt(examples)
@@ -179,24 +198,39 @@ class EnhancedPromptManager:
 
         return prompt
 
-    def get_prompt_metadata(self, question: str) -> Dict:
+    def get_prompt_metadata(self, question: str, similarity_method: str = None) -> Dict:
         """
         Get metadata about the prompt generation process.
 
         Args:
             question (str): The user's question
+            similarity_method (str): Similarity method used
 
         Returns:
             Dict: Metadata about examples and feedback used
         """
-        examples = self.get_dynamic_examples(question)
-        feedback = self.get_similar_feedback(question)
+        if similarity_method is None:
+            similarity_method = self.default_similarity_method
+            
+        examples = self.get_dynamic_examples(question, similarity_method=similarity_method)
+        feedback = self.get_similar_feedback(question, similarity_method=similarity_method)
 
         return {
             'examples_used': len(examples),
             'feedback_used': len(feedback),
+            'similarity_method': similarity_method,
             'example_similarities': [ex.get('similarity', 0) for ex in examples],
             'feedback_similarities': [fb.get('similarity', 0) for fb in feedback],
             'avg_example_similarity': sum(ex.get('similarity', 0) for ex in examples) / len(examples) if examples else 0,
             'avg_feedback_similarity': sum(fb.get('similarity', 0) for fb in feedback) / len(feedback) if feedback else 0
         }
+
+    def set_similarity_method(self, method: str):
+        """
+        Set the default similarity method to use.
+        
+        Args:
+            method (str): Similarity method ('cosine', 'euclidean', etc.)
+        """
+        self.default_similarity_method = method
+        print(f"--- Default similarity method changed to: {method} ---")

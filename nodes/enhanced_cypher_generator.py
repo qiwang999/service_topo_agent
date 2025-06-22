@@ -7,13 +7,15 @@ class EnhancedCypherGeneratorNode:
     """
     Enhanced Cypher generator node with caching and semantic search capabilities.
     """
-
+    
     def __init__(self, llm, enhanced_prompt_manager: EnhancedPromptManager,
-                 vector_db_manager, enable_cache: bool = True):
+                 vector_db_manager, enable_cache: bool = True,
+                 similarity_method: str = 'cosine'):
         self.llm = llm
         self.enhanced_prompt_manager = enhanced_prompt_manager
         self.vector_db_manager = vector_db_manager
         self.enable_cache = enable_cache
+        self.similarity_method = similarity_method
 
     def generate(self, state, db_schema: str) -> Dict:
         """
@@ -39,16 +41,18 @@ class EnhancedCypherGeneratorNode:
 
         # Check cache first if enabled
         if self.enable_cache:
-            cached_result = self.vector_db_manager.find_cached_result(question)
+            cached_result = self.vector_db_manager.find_cached_result(
+                question, method=self.similarity_method)
             if cached_result:
                 print(
-                    f"--- Cache hit! Similarity: {cached_result['similarity']:.3f} ---")
+                    f"--- Cache hit! Similarity ({self.similarity_method}): {cached_result['similarity']:.3f} ---")
                 state["messages"].append(
                     AIMessage(content=cached_result['generated_cypher']))
                 state["generation"] = cached_result['generated_cypher']
                 state["summary"] = cached_result['final_summary']
                 state["cache_hit"] = True
                 state["cache_similarity"] = cached_result['similarity']
+                state["similarity_method"] = self.similarity_method
                 return state
 
         # Create enhanced prompt with dynamic examples
@@ -56,12 +60,13 @@ class EnhancedCypherGeneratorNode:
             question=question,
             db_schema=db_schema,
             use_dynamic_examples=True,
-            include_feedback=True
+            include_feedback=True,
+            similarity_method=self.similarity_method
         )
 
         # Get prompt metadata for logging
         prompt_metadata = self.enhanced_prompt_manager.get_prompt_metadata(
-            question)
+            question, similarity_method=self.similarity_method)
 
         # Generate Cypher using LLM
         try:
@@ -72,6 +77,7 @@ class EnhancedCypherGeneratorNode:
             state["messages"].append(AIMessage(content=generated_cypher))
             state["generation"] = generated_cypher
             state["prompt_metadata"] = prompt_metadata
+            state["similarity_method"] = self.similarity_method
 
             # Cache the result if enabled
             if self.enable_cache:
@@ -84,7 +90,8 @@ class EnhancedCypherGeneratorNode:
                 )
 
             print(f"--- Generated Cypher with {prompt_metadata['examples_used']} examples, "
-                  f"{prompt_metadata['feedback_used']} feedback items ---")
+                  f"{prompt_metadata['feedback_used']} feedback items "
+                  f"(similarity method: {self.similarity_method}) ---")
 
         except Exception as e:
             print(f"Error generating Cypher: {e}")
@@ -94,17 +101,32 @@ class EnhancedCypherGeneratorNode:
 
         return state
 
-    def get_similar_queries(self, question: str, top_k: int = 5) -> list:
+    def get_similar_queries(self, question: str, top_k: int = 5,
+                          method: str = None) -> list:
         """
         Get similar queries from cache.
 
         Args:
             question (str): The question to find similar queries for
             top_k (int): Number of similar queries to return
+            method (str): Similarity method to use (defaults to instance method)
 
         Returns:
             list: List of similar queries
         """
+        if method is None:
+            method = self.similarity_method
+            
         # This would be implemented to search through cached queries
         # For now, return empty list
         return []
+
+    def set_similarity_method(self, method: str):
+        """
+        Set the similarity method to use for future operations.
+        
+        Args:
+            method (str): Similarity method ('cosine', 'euclidean', etc.)
+        """
+        self.similarity_method = method
+        print(f"--- Similarity method changed to: {method} ---")

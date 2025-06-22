@@ -188,6 +188,8 @@ SUMMARIZER_TYPE="llm"
 ENABLE_EMBEDDINGS="true"
 # Optional: Enable query caching
 ENABLE_CACHE="true"
+# Optional: Default similarity calculation method (cosine, euclidean, manhattan, dot_product, pearson, spearman, jaccard, hamming)
+DEFAULT_SIMILARITY_METHOD="cosine"
 ```
 **Note**: Ensure your Neo4j database is running and accessible.
 
@@ -287,7 +289,8 @@ All enhanced APIs are exposed with the `/enhanced/` prefix.
   {
     "query": "What is your question?",
     "history": [],
-    "run_mode": "standard"
+    "run_mode": "standard",
+    "similarity_method": "cosine"
   }
   ```
 - **Returns**: In addition to the original fields, includes `cache_hit`, `cache_similarity`, `prompt_metadata`, and other embedding-related information.
@@ -298,7 +301,7 @@ All enhanced APIs are exposed with the `/enhanced/` prefix.
 - **Method**: `POST`
 - **Body (JSON)**:
   ```json
-  { "question": "What is your question?", "top_k": 5 }
+  { "question": "What is your question?", "top_k": 5, "method": "cosine" }
   ```
 - **Returns**: `similar_examples` list with similarity scores.
 
@@ -308,9 +311,19 @@ All enhanced APIs are exposed with the `/enhanced/` prefix.
 - **Method**: `POST`
 - **Body (JSON)**:
   ```json
-  { "question": "What is your question?", "top_k": 3 }
+  { "question": "What is your question?", "top_k": 3, "method": "cosine" }
   ```
 - **Returns**: `similar_feedback` list with similarity scores.
+
+#### `/enhanced/set-similarity-method` Endpoint
+- **Function**: Dynamically change the similarity method for the agent.
+- **URL**: `/enhanced/set-similarity-method`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  { "method": "euclidean" }
+  ```
+- **Returns**: Confirmation message with the new similarity method.
 
 #### `/enhanced/cache-stats` Endpoint
 - **Function**: Query embedding query cache hit rates, most common questions, and other statistics.
@@ -321,6 +334,117 @@ All enhanced APIs are exposed with the `/enhanced/` prefix.
 - **Function**: Batch generate embedding vectors for existing examples and feedback (use after first deployment or data migration).
 - **URL**: `/enhanced/initialize-embeddings`
 - **Method**: `POST`
+
+## Embedding Enhancement System
+
+This system integrates OpenAI embedding APIs to implement advanced AI capabilities:
+
+- **Intelligent Example Selection**: Automatically retrieves the most similar few-shot examples for each Cypher generation, dynamically improving generation quality.
+- **Semantic Feedback Recall**: Automatically recalls historical user feedback most similar to the current question, assisting model correction.
+- **Query Caching**: Directly reuses historical Cypher and results for similar questions, significantly improving response speed.
+- **Semantic Search**: Supports similarity search for arbitrary text, facilitating knowledge discovery and recommendation.
+- **Professional Similarity Calculation**: Supports 8 different similarity calculation methods to adapt to different scenario requirements.
+
+### Similarity Calculation Methods
+
+The system supports the following 8 professional similarity calculation methods:
+
+#### 1. Cosine Similarity ⭐ Recommended
+- **Principle**: Calculates the cosine value of the angle between two vectors
+- **Use Cases**: Text similarity calculation, high-dimensional vector comparison
+- **Advantages**: Insensitive to vector length, high computational efficiency, stable results
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="cosine"`
+
+#### 2. Euclidean Distance
+- **Principle**: Calculates the straight-line distance between two vectors
+- **Use Cases**: Spatial distance calculation, numerical feature comparison
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="euclidean"`
+
+#### 3. Manhattan Distance
+- **Principle**: Calculates the Manhattan distance (L1 norm) between two vectors
+- **Use Cases**: Sparse vector comparison, high computational efficiency requirements
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="manhattan"`
+
+#### 4. Dot Product
+- **Principle**: Inner product of two vectors
+- **Use Cases**: Raw similarity calculation, preserving directional information
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="dot_product"`
+
+#### 5. Pearson Correlation
+- **Principle**: Calculates the linear correlation between two vectors
+- **Use Cases**: Linear relationship analysis, statistical correlation
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="pearson"`
+
+#### 6. Spearman Correlation
+- **Principle**: Rank-based correlation coefficient
+- **Use Cases**: Non-linear relationships, outlier handling
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="spearman"`
+
+#### 7. Jaccard Similarity
+- **Principle**: Calculates the ratio of intersection to union of two sets
+- **Use Cases**: Sparse vectors, set similarity
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="jaccard"`
+
+#### 8. Hamming Distance
+- **Principle**: Calculates the number of different bits between two binary vectors
+- **Use Cases**: Binary vectors, hash comparison
+- **Configuration**: `DEFAULT_SIMILARITY_METHOD="hamming"`
+
+### Performance Optimization
+
+- **FAISS Acceleration**: Large-scale vector search (>100 candidates) automatically uses FAISS acceleration
+- **Scikit-learn Batch Processing**: Medium-scale search (10-100 candidates) uses sklearn optimization
+- **Smart Caching**: Avoids duplicate API calls, improves efficiency
+- **Batch Processing**: Processes multiple queries simultaneously, reduces latency
+
+### How It Works
+- All examples, feedback, and historical questions are automatically generated as embedding vectors and stored in the local database.
+- Each time a user asks a question, the system performs semantic retrieval using embeddings to dynamically select the most relevant few-shot examples and feedback.
+- Query caching automatically hits high-similarity questions and directly returns historical results.
+- The system automatically selects the optimal similarity calculation algorithm based on data scale.
+
+### Usage Examples
+
+```bash
+# Intelligent conversation (automatic embedding enhancement)
+curl -X POST http://localhost:5001/enhanced/chat \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Which services does the api-gateway depend on?", "history": []}'
+
+# Conversation with specified similarity method
+curl -X POST http://localhost:5001/enhanced/chat \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Which services does the api-gateway depend on?", "history": [], "similarity_method": "euclidean"}'
+
+# Query most similar examples (specify method)
+curl -X POST http://localhost:5001/enhanced/similar-examples \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?", "top_k": 3, "method": "manhattan"}'
+
+# Query most similar feedback (specify method)
+curl -X POST http://localhost:5001/enhanced/similar-feedback \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?", "top_k": 2, "method": "pearson"}'
+
+# Dynamically switch similarity method
+curl -X POST http://localhost:5001/enhanced/set-similarity-method \
+     -H "Content-Type: application/json" \
+     -d '{"method": "euclidean"}'
+
+# Query cache statistics
+curl -X GET http://localhost:5001/enhanced/cache-stats
+
+# Initialize all embeddings (execute once after first deployment or migration)
+curl -X POST http://localhost:5001/enhanced/initialize-embeddings
+```
+
+### Important Notes
+- Embedding features are enabled by default. Set `ENABLE_EMBEDDINGS=false` to disable.
+- After first deployment or migration, it's recommended to call the `/enhanced/initialize-embeddings` endpoint first.
+- Embedding-related APIs run on port 5001 (separate from main API).
+- Embedding API calls consume OpenAI credits, please plan accordingly.
+- Different similarity methods are suitable for different scenarios. Choose the appropriate method based on data characteristics.
+- Cosine similarity is the default recommended method, suitable for most text similarity calculation scenarios.
 
 ## Example System Usage Guide
 
@@ -559,50 +683,4 @@ When this feature is enabled, every successful call to the `/chat` endpoint will
 
 When a user submits high-quality feedback (a rating of 4 or 5) via the `/feedback` endpoint, it is **automatically saved into `feedback.db` (an SQLite database)**.
 
-Upon receiving new feedback, the service **automatically reloads the agent**, incorporating all high-quality feedback from the database as new "real-world examples" into its prompt. This enables true **Online Learning**, allowing the agent to evolve and improve immediately after receiving feedback, without requiring a restart.
-
-## Embedding Enhancement System
-
-This system integrates the OpenAI embedding API to provide advanced AI capabilities:
-
-- **Intelligent Example Selection**: Automatically retrieves the most relevant few-shot examples for each Cypher generation, dynamically improving quality.
-- **Semantic Feedback Recall**: Automatically recalls the most similar historical user feedback to assist model correction.
-- **Query Cache**: Directly reuses historical Cypher/results for similar questions, greatly improving response speed.
-- **Semantic Search**: Supports similarity search for arbitrary text, enabling knowledge discovery and recommendation.
-
-### How It Works
-- All examples, feedback, and historical questions are automatically embedded and stored in the local database.
-- For each user query, the system uses embeddings for semantic search to dynamically select the most relevant few-shot examples and feedback.
-- The query cache automatically hits high-similarity questions and returns historical results directly.
-
-### Usage Examples
-
-```bash
-# Smart chat (embedding enhanced)
-curl -X POST http://localhost:5001/enhanced/chat \
-     -H "Content-Type: application/json" \
-     -d '{"query": "Which services does the api-gateway depend on?", "history": []}'
-
-# Find most similar examples
-topk=3
-curl -X POST http://localhost:5001/enhanced/similar-examples \
-     -H "Content-Type: application/json" \
-     -d '{"question": "Which services does the api-gateway depend on?", "top_k": '$topk'}'
-
-# Find most similar feedback
-curl -X POST http://localhost:5001/enhanced/similar-feedback \
-     -H "Content-Type: application/json" \
-     -d '{"question": "Which services does the api-gateway depend on?", "top_k": 2}'
-
-# Query cache statistics
-curl -X GET http://localhost:5001/enhanced/cache-stats
-
-# Initialize all embeddings (run once after deployment or migration)
-curl -X POST http://localhost:5001/enhanced/initialize-embeddings
-```
-
-### Notes
-- Embedding features are enabled by default. To disable, set `ENABLE_EMBEDDINGS=false`.
-- After first deployment or migration, it is recommended to call `/enhanced/initialize-embeddings`.
-- Embedding-related API runs on port 5001 (separate from the main API).
-- Embedding API calls will consume your OpenAI quota, please plan accordingly. 
+Upon receiving new feedback, the service **automatically reloads the agent**, incorporating all high-quality feedback from the database as new "real-world examples" into its prompt. This enables true **Online Learning**, allowing the agent to evolve and improve immediately after receiving feedback, without requiring a restart. 

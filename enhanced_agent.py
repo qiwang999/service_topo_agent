@@ -29,7 +29,8 @@ class EnhancedText2CypherAgent:
     def __init__(self, feedback_examples: List[Dict], model_name="gpt-4o",
                  prompt_template: str = None, examples_file_path: str = "examples.json",
                  summarizer_type: str = "llm", run_mode: str = "standard",
-                 enable_cache: bool = True, enable_embeddings: bool = True):
+                 enable_cache: bool = True, enable_embeddings: bool = True,
+                 similarity_method: str = 'cosine'):
 
         self.llm = setup_llm(model_name)
         self.neo4j_client = Neo4jClient()
@@ -37,6 +38,7 @@ class EnhancedText2CypherAgent:
         self.run_mode = run_mode
         self.enable_cache = enable_cache
         self.enable_embeddings = enable_embeddings
+        self.similarity_method = similarity_method
 
         # Initialize vector database manager
         self.vector_db_manager = VectorDBManager()
@@ -45,12 +47,14 @@ class EnhancedText2CypherAgent:
         self.enhanced_prompt_manager = EnhancedPromptManager(
             vector_db_manager=self.vector_db_manager,
             base_prompt_template=prompt_template,
-            examples_file_path=examples_file_path
+            examples_file_path=examples_file_path,
+            default_similarity_method=similarity_method
         )
 
         # Initialize nodes
         self.enhanced_cypher_generator_node = EnhancedCypherGeneratorNode(
-            self.llm, self.enhanced_prompt_manager, self.vector_db_manager, enable_cache
+            self.llm, self.enhanced_prompt_manager, self.vector_db_manager, 
+            enable_cache, similarity_method
         )
         self.cypher_validator_node = CypherValidatorNode(
             self.llm, self.db_schema)
@@ -70,6 +74,7 @@ class EnhancedText2CypherAgent:
         print(f"   Run mode: {run_mode}")
         print(f"   Cache enabled: {enable_cache}")
         print(f"   Embeddings enabled: {enable_embeddings}")
+        print(f"   Similarity method: {similarity_method}")
 
         # Initialize vector database if embeddings are enabled
         if self.enable_embeddings:
@@ -211,16 +216,42 @@ class EnhancedText2CypherAgent:
         if final_state.get("prompt_metadata"):
             response["prompt_metadata"] = final_state.get("prompt_metadata")
 
+        # Add similarity method information
+        if final_state.get("similarity_method"):
+            response["similarity_method"] = final_state.get("similarity_method")
+
         return response
 
     def get_cache_stats(self) -> Dict:
         """Get cache statistics."""
         return self.vector_db_manager.get_cache_stats()
 
-    def find_similar_examples(self, question: str, top_k: int = 5) -> List[Dict]:
+    def find_similar_examples(self, question: str, top_k: int = 5,
+                            method: str = None) -> List[Dict]:
         """Find similar examples for a question."""
-        return self.vector_db_manager.find_similar_examples(question, top_k)
+        if method is None:
+            method = self.similarity_method
+        return self.vector_db_manager.find_similar_examples(question, top_k, method=method)
 
-    def find_similar_feedback(self, question: str, top_k: int = 3) -> List[Dict]:
+    def find_similar_feedback(self, question: str, top_k: int = 3,
+                            method: str = None) -> List[Dict]:
         """Find similar feedback for a question."""
-        return self.vector_db_manager.find_similar_feedback(question, top_k)
+        if method is None:
+            method = self.similarity_method
+        return self.vector_db_manager.find_similar_feedback(question, top_k, method=method)
+
+    def set_similarity_method(self, method: str):
+        """
+        Set the similarity method to use for future operations.
+        
+        Args:
+            method (str): Similarity method ('cosine', 'euclidean', etc.)
+        """
+        self.similarity_method = method
+        self.enhanced_prompt_manager.set_similarity_method(method)
+        self.enhanced_cypher_generator_node.set_similarity_method(method)
+        print(f"--- Agent similarity method changed to: {method} ---")
+
+    def get_embedding_cache_stats(self) -> Dict:
+        """Get embedding cache statistics."""
+        return self.vector_db_manager.get_embedding_cache_stats()

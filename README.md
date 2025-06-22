@@ -194,6 +194,8 @@ SUMMARIZER_TYPE="llm"
 ENABLE_EMBEDDINGS="true"
 # 可选：是否启用查询缓存
 ENABLE_CACHE="true"
+# 可选：默认相似度计算方法 (cosine, euclidean, manhattan, dot_product, pearson, spearman, jaccard, hamming)
+DEFAULT_SIMILARITY_METHOD="cosine"
 ```
 **注意**: 请确保您的 Neo4j 数据库正在运行且可以访问。
 
@@ -336,11 +338,65 @@ gunicorn --config gunicorn_config.py app:app
 - **语义反馈召回**：自动召回与当前问题最相似的历史用户反馈，辅助模型修正。
 - **查询缓存**：对相似问题直接复用历史Cypher和结果，大幅提升响应速度。
 - **语义检索**：支持任意文本的相似性搜索，助力知识发现与推荐。
+- **专业相似度计算**：支持8种不同的相似度计算方法，适应不同场景需求。
+
+### 相似度计算方法
+
+系统支持以下8种专业的相似度计算方法：
+
+#### 1. 余弦相似度 (Cosine Similarity) ⭐ 推荐
+- **原理**: 计算两个向量之间的夹角余弦值
+- **适用场景**: 文本相似度计算、高维向量比较
+- **优点**: 对向量长度不敏感、计算效率高、效果稳定
+- **配置**: `DEFAULT_SIMILARITY_METHOD="cosine"`
+
+#### 2. 欧几里得距离 (Euclidean Distance)
+- **原理**: 计算两个向量间的直线距离
+- **适用场景**: 空间距离计算、数值型特征比较
+- **配置**: `DEFAULT_SIMILARITY_METHOD="euclidean"`
+
+#### 3. 曼哈顿距离 (Manhattan Distance)
+- **原理**: 计算两个向量间的曼哈顿距离（L1范数）
+- **适用场景**: 稀疏向量比较、计算效率要求高
+- **配置**: `DEFAULT_SIMILARITY_METHOD="manhattan"`
+
+#### 4. 点积 (Dot Product)
+- **原理**: 两个向量的内积
+- **适用场景**: 原始相似度计算、需要保留方向信息
+- **配置**: `DEFAULT_SIMILARITY_METHOD="dot_product"`
+
+#### 5. 皮尔逊相关系数 (Pearson Correlation)
+- **原理**: 计算两个向量的线性相关性
+- **适用场景**: 线性关系分析、统计相关性
+- **配置**: `DEFAULT_SIMILARITY_METHOD="pearson"`
+
+#### 6. 斯皮尔曼相关系数 (Spearman Correlation)
+- **原理**: 基于排序的相关系数
+- **适用场景**: 非线性关系、异常值处理
+- **配置**: `DEFAULT_SIMILARITY_METHOD="spearman"`
+
+#### 7. Jaccard相似度 (Jaccard Similarity)
+- **原理**: 计算两个集合的交集与并集之比
+- **适用场景**: 稀疏向量、集合相似度
+- **配置**: `DEFAULT_SIMILARITY_METHOD="jaccard"`
+
+#### 8. 汉明距离 (Hamming Distance)
+- **原理**: 计算两个二进制向量不同位的数量
+- **适用场景**: 二进制向量、哈希比较
+- **配置**: `DEFAULT_SIMILARITY_METHOD="hamming"`
+
+### 性能优化
+
+- **FAISS加速**: 大规模向量搜索 (>100个候选) 自动使用FAISS加速
+- **Scikit-learn批处理**: 中等规模搜索 (10-100个候选) 使用sklearn优化
+- **智能缓存**: 避免重复API调用，提升效率
+- **批量处理**: 多个查询同时处理，减少延迟
 
 ### 工作原理
 - 所有示例、反馈、历史问题等均会自动生成embedding向量并存储在本地数据库。
 - 每次用户提问时，系统会用embedding进行语义检索，动态选择最相关的few-shot示例和反馈。
 - 查询缓存会自动命中高相似度问题，直接返回历史结果。
+- 系统根据数据规模自动选择最优的相似度计算算法。
 
 ### 用法示例
 
@@ -350,16 +406,25 @@ curl -X POST http://localhost:5001/enhanced/chat \
      -H "Content-Type: application/json" \
      -d '{"query": "api-gateway 依赖哪些服务?", "history": []}'
 
-# 查询与问题最相似的示例
-topk=3
+# 指定相似度方法的对话
+curl -X POST http://localhost:5001/enhanced/chat \
+     -H "Content-Type: application/json" \
+     -d '{"query": "api-gateway 依赖哪些服务?", "history": [], "similarity_method": "euclidean"}'
+
+# 查询与问题最相似的示例（指定方法）
 curl -X POST http://localhost:5001/enhanced/similar-examples \
      -H "Content-Type: application/json" \
-     -d '{"question": "api-gateway 依赖哪些服务?", "top_k": '$topk'}'
+     -d '{"question": "api-gateway 依赖哪些服务?", "top_k": 3, "method": "manhattan"}'
 
-# 查询与问题最相似的反馈
+# 查询与问题最相似的反馈（指定方法）
 curl -X POST http://localhost:5001/enhanced/similar-feedback \
      -H "Content-Type: application/json" \
-     -d '{"question": "api-gateway 依赖哪些服务?", "top_k": 2}'
+     -d '{"question": "api-gateway 依赖哪些服务?", "top_k": 2, "method": "pearson"}'
+
+# 动态切换相似度方法
+curl -X POST http://localhost:5001/enhanced/set-similarity-method \
+     -H "Content-Type: application/json" \
+     -d '{"method": "euclidean"}'
 
 # 查询缓存统计
 curl -X GET http://localhost:5001/enhanced/cache-stats
@@ -373,6 +438,8 @@ curl -X POST http://localhost:5001/enhanced/initialize-embeddings
 - 首次部署或迁移后建议先调用 `/enhanced/initialize-embeddings` 端点。
 - embedding相关API端口为5001（与主API分开）。
 - embedding接口调用会消耗OpenAI额度，请合理规划。
+- 不同相似度方法适用于不同场景，建议根据数据特点选择合适的方法。
+- 余弦相似度是默认推荐方法，适用于大多数文本相似度计算场景。
 
 ## 如何改进智能体
 
