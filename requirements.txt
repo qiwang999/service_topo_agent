@@ -1,8 +1,9 @@
-langchain
-langgraph
-langchain-openai
-langchain-community
-neo4j
-python-dotenv
-flask
-gunicorn 
+langchain==0.1.0
+langchain-openai==0.0.5
+langgraph==0.0.20
+openai==1.12.0
+neo4j==5.15.0
+flask==3.0.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
+numpy==1.24.3 

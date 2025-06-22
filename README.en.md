@@ -69,14 +69,71 @@ The project is organized into a modular structure for clarity and scalability:
     - `query_executor.py`: Executes the query against Neo4j.
     - `summarizer_node.py`: Summarizes results using an LLM.
     - `manual_summarizer_node.py`: Formats results using predefined logic.
+    - `enhanced_cypher_generator.py`: Enhanced generator with dynamic example selection and caching.
 - `tools/`: Holds clients for external services.
     - `llm_client.py`: Initializes the connection to the OpenAI API.
     - `neo4j_client.py`: Manages the connection to the Neo4j database.
+    - `embedding_client.py`: Handles text embedding generation and similarity calculation.
 - `prompts/`: Manages all prompt-related logic.
-    - `prompt_manager.py`: Loads and formats prompt templates and examples.
+    - `prompt_manager.py`: Loads and formats prompt templates and examples, supports static example management.
+    - `enhanced_prompt_manager.py`: Enhanced prompt manager with dynamic example selection and semantic search.
 - `database/`: Database management components.
     - `db_manager.py`: Manages SQLite database operations for feedback and interaction logs.
+    - `vector_db_manager.py`: Manages vector database for embedding storage and semantic search.
 - `examples.json`: Stores few-shot examples for the prompt, making it easy to improve the agent without changing code.
+
+### Example System Architecture
+
+The example system adopts a layered architecture design supporting multiple example management strategies:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                Example System Architecture                   │
+├─────────────────────────────────────────────────────────────┤
+│  User Layer                                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │ Static       │  │ Dynamic     │  │ User        │          │
+│  │ Examples     │  │ Examples    │  │ Feedback    │          │
+│  │ examples.json│  │ embedding   │  │ /feedback   │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+├─────────────────────────────────────────────────────────────┤
+│  Management Layer                                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │PromptManager│  │Enhanced     │  │VectorDB     │          │
+│  │Static       │  │PromptManager│  │Manager      │          │
+│  │Example Mgmt │  │Dynamic      │  │Vector       │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+├─────────────────────────────────────────────────────────────┤
+│  Storage Layer                                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │ examples.json│  │ feedback.db │  │ vector.db   │          │
+│  │ Predefined  │  │ User        │  │ Embedding   │          │
+│  │ Examples    │  │ Feedback    │  │ Vectors     │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Core Component Descriptions**:
+
+1. **Static Example Management** (`examples.json` + `PromptManager`):
+   - Provides stable base example collection
+   - Supports rapid iteration and testing
+   - Updates without code modification
+
+2. **Dynamic Example Selection** (`EnhancedPromptManager` + `VectorDBManager`):
+   - Intelligent example selection based on semantic similarity
+   - Supports real-time example optimization
+   - Provides personalized example recommendations
+
+3. **User Feedback System** (`DBManager` + Feedback API):
+   - Collects user-corrected Cypher queries
+   - Automatically learns from high-quality feedback
+   - Implements online model optimization
+
+4. **Vector Database** (`VectorDBManager`):
+   - Stores text embedding vectors
+   - Supports semantic similarity search
+   - Provides query caching functionality
 
 ## Setup Instructions
 
@@ -126,6 +183,11 @@ DEFAULT_RUN_MODE="standard"
 
 # Optional: Summarizer type (llm or manual)
 SUMMARIZER_TYPE="llm"
+
+# Optional: Enable embedding-related features
+ENABLE_EMBEDDINGS="true"
+# Optional: Enable query caching
+ENABLE_CACHE="true"
 ```
 **Note**: Ensure your Neo4j database is running and accessible.
 
@@ -212,6 +274,279 @@ Used to submit user feedback to improve the model.
   }
   ```
 
+## Enhanced API Endpoints (Embedding-related)
+
+All enhanced APIs are exposed with the `/enhanced/` prefix.
+
+#### `/enhanced/chat` Endpoint
+- **Function**: Supports embedding intelligent example selection, feedback recall, and query caching.
+- **URL**: `/enhanced/chat`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+    "query": "What is your question?",
+    "history": [],
+    "run_mode": "standard"
+  }
+  ```
+- **Returns**: In addition to the original fields, includes `cache_hit`, `cache_similarity`, `prompt_metadata`, and other embedding-related information.
+
+#### `/enhanced/similar-examples` Endpoint
+- **Function**: Returns the most similar few-shot examples for the input question.
+- **URL**: `/enhanced/similar-examples`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  { "question": "What is your question?", "top_k": 5 }
+  ```
+- **Returns**: `similar_examples` list with similarity scores.
+
+#### `/enhanced/similar-feedback` Endpoint
+- **Function**: Returns the most similar historical user feedback for the input question.
+- **URL**: `/enhanced/similar-feedback`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  { "question": "What is your question?", "top_k": 3 }
+  ```
+- **Returns**: `similar_feedback` list with similarity scores.
+
+#### `/enhanced/cache-stats` Endpoint
+- **Function**: Query embedding query cache hit rates, most common questions, and other statistics.
+- **URL**: `/enhanced/cache-stats`
+- **Method**: `GET`
+
+#### `/enhanced/initialize-embeddings` Endpoint
+- **Function**: Batch generate embedding vectors for existing examples and feedback (use after first deployment or data migration).
+- **URL**: `/enhanced/initialize-embeddings`
+- **Method**: `POST`
+
+## Example System Usage Guide
+
+This system employs a multi-layered example management mechanism to continuously improve agent performance through `examples.json` files and user feedback systems.
+
+#### 1. Static Example Management (`examples.json`)
+
+The `examples.json` file stores predefined few-shot examples used to guide LLM generation of accurate Cypher queries.
+
+**File Structure**:
+```json
+[
+  {
+    "natural_language": "Which services does the 'api-gateway' depend on?",
+    "cypher": "MATCH (s:Service {name: 'api-gateway'})-[:DEPENDS_ON]->(dependency:Service) RETURN dependency.name AS dependencies"
+  },
+  {
+    "natural_language": "List all instances for the 'user-service'.",
+    "cypher": "MATCH (i:Instance)-[:INSTANCE_OF]->(s:Service {name: 'user-service'}) RETURN i.id AS instance_id, i.ip_address AS ip, i.status AS status"
+  }
+]
+```
+
+**Usage Flow**:
+1. **Loading Phase**: `PromptManager` automatically loads the `examples.json` file at system startup
+2. **Formatting Phase**: Examples are formatted into text suitable for LLM understanding
+3. **Injection Phase**: Formatted examples are injected into the prompt template
+4. **Generation Phase**: LLM generates new Cypher queries based on these examples
+
+**Advantages**:
+- Update examples without modifying code
+- Provide stable base example collection
+- Support rapid iteration and testing
+
+#### 2. Dynamic Example Selection (Enhanced Mode)
+
+In Enhanced mode, the system uses embedding technology to implement intelligent example selection:
+
+**Workflow**:
+```mermaid
+graph TD
+    A[User Question] --> B[Generate Question Embedding]
+    B --> C[Calculate Similarity with All Examples]
+    C --> D[Select Most Similar Examples]
+    D --> E[Dynamically Build Prompt]
+    E --> F[Generate Cypher Query]
+```
+
+**API Endpoints**:
+- `/enhanced/similar-examples`: Query examples most similar to the question
+- `/enhanced/initialize-embeddings`: Initialize embedding vectors for all examples
+
+**Usage Examples**:
+```bash
+# Query similar examples
+curl -X POST http://localhost:5001/enhanced/similar-examples \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?", "top_k": 3}'
+
+# Initialize embeddings (execute after first deployment)
+curl -X POST http://localhost:5001/enhanced/initialize-embeddings
+```
+
+#### 3. User Feedback System
+
+The system implements online learning through user feedback to continuously improve example quality:
+
+**Feedback Flow**:
+1. **Submit Feedback**: Users submit corrected Cypher via `/feedback` endpoint
+2. **Quality Assessment**: System evaluates feedback quality based on rating (1-5 points)
+3. **Automatic Learning**: High-quality feedback (4-5 points) automatically joins the example library
+4. **Immediate Effect**: New feedback takes effect immediately without service restart
+
+**Feedback Data Structure**:
+```json
+{
+    "question": "User's original question",
+    "generated_cypher": "Agent's incorrect Cypher",
+    "correct_cypher": "User's corrected Cypher",
+    "rating": 5
+}
+```
+
+**API Usage**:
+```bash
+curl -X POST http://localhost:5000/feedback \
+     -H "Content-Type: application/json" \
+     -d '{
+       "question": "Which services does the api-gateway depend on?",
+       "generated_cypher": "MATCH (s:Service)-[:DEPENDS_ON]->(d:Service) RETURN d.name",
+       "correct_cypher": "MATCH (s:Service {name: \"api-gateway\"})-[:DEPENDS_ON]->(d:Service) RETURN d.name",
+       "rating": 5
+     }'
+```
+
+#### 4. Example Optimization Strategies
+
+**Example Selection Strategies**:
+- **Static Mode**: Use all examples from `examples.json`
+- **Dynamic Mode**: Select most relevant examples based on semantic similarity
+- **Hybrid Mode**: Supplement static examples when dynamic examples are insufficient
+
+**Example Quality Improvement**:
+- Regularly analyze user feedback to identify common error patterns
+- Adjust example coverage based on actual usage
+- Validate example effectiveness through A/B testing
+
+**Best Practices**:
+1. **Diversity**: Ensure examples cover different types of query patterns
+2. **Accuracy**: Regularly verify example correctness
+3. **Simplicity**: Keep examples concise and clear, avoid over-complexity
+4. **Practicality**: Build examples based on real user questions
+
+#### 5. Monitoring and Analysis
+
+**Key Metrics**:
+- Example usage frequency and effectiveness
+- User feedback rating distribution
+- Query success rate changes
+- Response time optimization effects
+
+**Analysis Tools**:
+```bash
+# Query cache statistics (includes example usage)
+curl -X GET http://localhost:5001/enhanced/cache-stats
+
+# View similar feedback (understand user correction patterns)
+curl -X POST http://localhost:5001/enhanced/similar-feedback \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Your question", "top_k": 5}'
+```
+
+#### 6. Complete Workflow
+
+Below is the complete workflow from user question to final result:
+
+**Standard Mode Workflow**:
+```mermaid
+graph TD
+    A[User Question] --> B{Embedding Enabled?}
+    B -->|Yes| C[Generate Question Embedding]
+    B -->|No| D[Load Static Examples]
+    C --> E[Calculate Similarity]
+    E --> F[Select Most Similar Examples]
+    F --> G[Build Dynamic Prompt]
+    D --> H[Build Static Prompt]
+    G --> I[LLM Generate Cypher]
+    H --> I
+    I --> J[LLM Validate Cypher]
+    J --> K{Validation Pass?}
+    K -->|No| I
+    K -->|Yes| L[Execute Query]
+    L --> M{Execution Success?}
+    M -->|No| I
+    M -->|Yes| N[Generate Summary]
+    N --> O[Return Result]
+```
+
+**Enhanced Mode Workflow**:
+```mermaid
+graph TD
+    A[User Question] --> B[Check Query Cache]
+    B --> C{Cache Hit?}
+    C -->|Yes| D[Return Cached Result]
+    C -->|No| E[Generate Question Embedding]
+    E --> F[Semantic Search Similar Examples]
+    F --> G[Semantic Search Similar Feedback]
+    G --> H[Dynamically Build Prompt]
+    H --> I[LLM Generate Cypher]
+    I --> J[LLM Validate Cypher]
+    J --> K{Validation Pass?}
+    K -->|No| I
+    K -->|Yes| L[Execute Query]
+    L --> M{Execution Success?}
+    M -->|No| I
+    M -->|Yes| N[Generate Summary]
+    N --> O[Cache Result]
+    O --> P[Return Result]
+```
+
+**Example Selection Strategy Comparison**:
+
+| Feature | Static Mode | Dynamic Mode | Enhanced Mode |
+|---------|-------------|--------------|---------------|
+| Example Source | examples.json | All examples | All examples + feedback |
+| Selection Method | Fixed order | Semantic similarity | Semantic similarity + cache |
+| Response Speed | Fast | Medium | Fastest (cache) |
+| Accuracy | Stable | Higher | Highest |
+| Personalization | None | Yes | Strong |
+| Maintenance Cost | Low | Medium | Medium |
+
+**Practical Usage Examples**:
+
+1. **Static Mode** (Standard API):
+```bash
+curl -X POST http://localhost:5000/chat \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?"}'
+```
+
+2. **Dynamic Mode** (Enhanced API):
+```bash
+curl -X POST http://localhost:5001/enhanced/chat \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Which services does the api-gateway depend on?", "history": []}'
+```
+
+3. **Feedback Submission**:
+```bash
+curl -X POST http://localhost:5000/feedback \
+     -H "Content-Type: application/json" \
+     -d '{
+       "question": "Which services does the api-gateway depend on?",
+       "generated_cypher": "MATCH (s:Service)-[:DEPENDS_ON]->(d:Service) RETURN d.name",
+       "correct_cypher": "MATCH (s:Service {name: \"api-gateway\"})-[:DEPENDS_ON]->(d:Service) RETURN d.name",
+       "rating": 5
+     }'
+```
+
+**Performance Optimization Recommendations**:
+
+1. **Example Quantity Control**: Recommend keeping example count between 5-10 to avoid overly long prompts
+2. **Similarity Threshold**: In dynamic mode, recommend setting similarity threshold ≥0.7 to ensure example relevance
+3. **Cache Strategy**: Enabling query cache can significantly improve response speed
+4. **Regular Cleanup**: Periodically clean low-quality feedback to maintain example library quality
+
 ## Improving the Agent
 
 ### Interaction Logging
@@ -224,4 +559,50 @@ When this feature is enabled, every successful call to the `/chat` endpoint will
 
 When a user submits high-quality feedback (a rating of 4 or 5) via the `/feedback` endpoint, it is **automatically saved into `feedback.db` (an SQLite database)**.
 
-Upon receiving new feedback, the service **automatically reloads the agent**, incorporating all high-quality feedback from the database as new "real-world examples" into its prompt. This enables true **Online Learning**, allowing the agent to evolve and improve immediately after receiving feedback, without requiring a restart. 
+Upon receiving new feedback, the service **automatically reloads the agent**, incorporating all high-quality feedback from the database as new "real-world examples" into its prompt. This enables true **Online Learning**, allowing the agent to evolve and improve immediately after receiving feedback, without requiring a restart.
+
+## Embedding Enhancement System
+
+This system integrates the OpenAI embedding API to provide advanced AI capabilities:
+
+- **Intelligent Example Selection**: Automatically retrieves the most relevant few-shot examples for each Cypher generation, dynamically improving quality.
+- **Semantic Feedback Recall**: Automatically recalls the most similar historical user feedback to assist model correction.
+- **Query Cache**: Directly reuses historical Cypher/results for similar questions, greatly improving response speed.
+- **Semantic Search**: Supports similarity search for arbitrary text, enabling knowledge discovery and recommendation.
+
+### How It Works
+- All examples, feedback, and historical questions are automatically embedded and stored in the local database.
+- For each user query, the system uses embeddings for semantic search to dynamically select the most relevant few-shot examples and feedback.
+- The query cache automatically hits high-similarity questions and returns historical results directly.
+
+### Usage Examples
+
+```bash
+# Smart chat (embedding enhanced)
+curl -X POST http://localhost:5001/enhanced/chat \
+     -H "Content-Type: application/json" \
+     -d '{"query": "Which services does the api-gateway depend on?", "history": []}'
+
+# Find most similar examples
+topk=3
+curl -X POST http://localhost:5001/enhanced/similar-examples \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?", "top_k": '$topk'}'
+
+# Find most similar feedback
+curl -X POST http://localhost:5001/enhanced/similar-feedback \
+     -H "Content-Type: application/json" \
+     -d '{"question": "Which services does the api-gateway depend on?", "top_k": 2}'
+
+# Query cache statistics
+curl -X GET http://localhost:5001/enhanced/cache-stats
+
+# Initialize all embeddings (run once after deployment or migration)
+curl -X POST http://localhost:5001/enhanced/initialize-embeddings
+```
+
+### Notes
+- Embedding features are enabled by default. To disable, set `ENABLE_EMBEDDINGS=false`.
+- After first deployment or migration, it is recommended to call `/enhanced/initialize-embeddings`.
+- Embedding-related API runs on port 5001 (separate from the main API).
+- Embedding API calls will consume your OpenAI quota, please plan accordingly. 
